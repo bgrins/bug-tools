@@ -1,0 +1,1 @@
+This folder is used to store .diff files pulled down via: https://hg.mozilla.org/mozilla-central/raw-rev/REVID
