@@ -3,8 +3,7 @@ const fs = require("fs");
 const execSync = require("child_process").execSync;
 const fetch = require("node-fetch");
 const MAX_DEPTH = 1;
-const MAX_DAYS_SINCE_COMMIT = 1;
-const COMMITS_FOR_BUGS = new Map();
+const REVS_FOR_BUGS = new Map();
 const METADATA_FOR_BUGS = new Map();
 let browser;
 
@@ -62,8 +61,11 @@ async function fetchCommitsFor(url, depth = 0) {
   if (depth > MAX_DEPTH) {
     return;
   }
-  if (COMMITS_FOR_BUGS.has(url)) {
-    console.log("Already seen", url);
+  let messagePadding = Array(depth * 2).join(" ");
+  if (REVS_FOR_BUGS.has(url)) {
+    console.log(
+      `${messagePadding}Skipping because this URL has already been seen (I don't think this should happen): ${url}`
+    );
     return;
   }
 
@@ -78,7 +80,7 @@ async function fetchCommitsFor(url, depth = 0) {
   });
 
   if (depth > 0 && skip) {
-    console.log("Skipping meta");
+    console.log(`${messagePadding}Skipping metabug: ${url}`);
     return;
   }
   const commits = await page.evaluate(() => {
@@ -93,11 +95,14 @@ async function fetchCommitsFor(url, depth = 0) {
         );
       })
       .map(comment => {
-        return [...comment.querySelectorAll("a")].map(a => a.href);
-      });
+        return [...comment.querySelectorAll("a")].map(a =>
+          a.href.split("/").pop()
+        );
+      })
+      .reduce((acc, val) => acc.concat(val), []); // Flatten multiple comments into one array
   });
 
-  COMMITS_FOR_BUGS.set(url, commits);
+  REVS_FOR_BUGS.set(url, commits);
 
   const metadata = await page.evaluate(() => {
     let email = document.querySelector("#field-value-assigned_to .email");
@@ -121,7 +126,7 @@ async function fetchCommitsFor(url, depth = 0) {
     });
   });
   console.log(
-    `Completed ${url}: ${resolvedBugs.length} dependancies and ${commits.length} mozilla-central commits`
+    `${messagePadding}For ${url} there are ${resolvedBugs.length} dependancies and ${commits.length} mozilla-central commits`
   );
   await page.close();
 
@@ -132,36 +137,95 @@ async function fetchCommitsFor(url, depth = 0) {
 (async () => {
   browser = await puppeteer.launch({ headless });
   await fetchCommitsFor(rootBug);
-  console.log(COMMITS_FOR_BUGS, METADATA_FOR_BUGS);
+  console.log(REVS_FOR_BUGS, METADATA_FOR_BUGS);
   await browser.close();
 
-  console.log("Fetching raw rev");
+  let totalChanged = (totalInsertions = totalDeletions = 0);
+  let flattenedRevs = [];
+  for (let revs of REVS_FOR_BUGS.values()) {
+    for (let rev of revs) {
+      flattenedRevs.push(rev);
+    }
+  }
+  for (let rev of flattenedRevs) {
+    let fileName = `cache/${rev}.diff`;
+    if (disableCache || !fs.existsSync(fileName)) {
+      console.log(`Fetching ${rev}`);
+      await downloadFile(
+        `https://hg.mozilla.org/mozilla-central/raw-rev/${rev}`,
+        fileName
+      );
+    }
 
-  let revString = "b8a5f2a349bc";
-  let fileName = `cache/${revString}.diff`;
-  if (disableCache || !fs.existsSync(fileName)) {
-    downloadFile(
-      `https://hg.mozilla.org/mozilla-central/raw-rev/${revString}`,
-      fileName
+    console.log(`Executing: |diffstat -t ${fileName}|`);
+
+    let { changed, insertions, deletions } = parseDiffstatOutput(
+      execSync(`diffstat -t ${fileName}`).toString()
     );
+    console.log(
+      `For ${fileName} we have ${changed} changed, ${insertions} insertions, ${deletions} deletions`
+    );
+    totalChanged += changed;
+    totalInsertions += insertions;
+    totalDeletions += deletions;
   }
 
-  console.log(parseDiffstatOutput(execSync(`diffstat ${fileName}`).toString()));
+  console.log(`Total for ${rootBug} with depth=${MAX_DEPTH}:
+${totalChanged} changed, ${totalInsertions} insertions, ${totalDeletions} deletions.
+Net addition of ${totalInsertions - totalDeletions} lines.`);
 })();
 
 function parseDiffstatOutput(str) {
+/*
+The output looks something like this, with an extra newline at the end
+
+`
+INSERTED,DELETED,MODIFIED,FILENAME
+0,4,0,GeckoBindings.cpp
+0,4,0,GeckoBindings.h
+`
+*/
+
+  let rows = str.split("\n");
+  if (rows[0] != "INSERTED,DELETED,MODIFIED,FILENAME" || rows[rows.length - 1] != "") {
+    throw new Error(`Unexpected |diffstat -t| output ${str}`);
+  }
+
+  let insertions = 0;
+  let deletions = 0;
+  let changed = 0;
+  for (let row of rows.slice(1, -1)) {
+    let cols = row.split(",");
+    insertions += parseInt(cols[0]);
+    deletions += parseInt(cols[1]);
+    changed += parseInt(cols[2]);
+  }
+  return { insertions, deletions, changed };
+}
+
+function parseDiffstatOutputOld(str) {
   /* The output looks like:
   `
-  base/Element.cpp     |   24 +++---------------------
-  base/nsIContent.h    |    4 ++--
-  xul/nsXULElement.cpp |   14 ++------------
-  xul/nsXULElement.h   |   15 ---------------
-  4 files changed, 7 insertions(+), 50 deletions(-)
+base/Element.cpp     |   24 +++---------------------
+base/nsIContent.h    |    4 ++--
+xul/nsXULElement.cpp |   14 ++------------
+xul/nsXULElement.h   |   15 ---------------
+4 files changed, 7 insertions(+), 50 deletions(-)
+  `
+
+  or:
+
+  `
+ dom/base/Document.cpp                            |   12 ------------
+ dom/base/Document.h                              |    7 -------
+ dom/webidl/Document.webidl                       |    3 ---
+ js/xpconnect/tests/mochitest/test_bug912322.html |    3 +--
+ 4 files changed, 1 insertion(+), 24 deletions(-)
   `
   */
 
   let matches = str.match(
-    /(\d+) files changed, (\d+) insertions\(\+\), (\d+) deletions\(\-\)/
+    /(\d+) files? changed, (\d+) insertions?\(\+\), (\d+) deletions?\(\-\)/
   );
 
   if (!matches) {
