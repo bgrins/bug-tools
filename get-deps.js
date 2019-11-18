@@ -2,12 +2,11 @@ const puppeteer = require("puppeteer");
 const fs = require("fs");
 const execSync = require("child_process").execSync;
 const fetch = require("node-fetch");
-const MAX_DEPTH = 1;
 const REVS_FOR_BUGS = new Map();
 const METADATA_FOR_BUGS = new Map();
 let browser;
 
-let { rootBug, afterDate, headless, disableCache } = (() => {
+let { rootBug, afterDate, headless, disableCache, maxDepth } = (() => {
   const isValidUrl = string => {
     try {
       new URL(string);
@@ -19,7 +18,7 @@ let { rootBug, afterDate, headless, disableCache } = (() => {
   const isValidDate = string => {
     return (
       string &&
-      !!string.match(/([12]\d{3}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]))/)
+      !!string.match(/(([12]\d{3})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]))/)
     );
   };
 
@@ -45,11 +44,24 @@ let { rootBug, afterDate, headless, disableCache } = (() => {
         "Pass a valid date with --after parameter (for example: `--after 2019-11-10`"
       );
     }
+
+    afterDate = dateFromDashedString(afterDate);
   }
 
   let headless = args.indexOf("--headless") != -1;
   let disableCache = args.indexOf("--disable-cache") != -1;
-  return { rootBug, afterDate, headless, disableCache };
+
+  let maxDepth = 1;
+  let depthIndex = args.indexOf("--max-depth");
+  if (depthIndex > -1) {
+    maxDepth = args[depthIndex + 1];
+    if (isNaN(maxDepth)) {
+      throw new Error(
+        "Pass a valid number with --max-depth parameter (for example: `--max-depth 2`"
+      );
+    }
+  }
+  return { rootBug, afterDate, headless, disableCache, maxDepth };
 })();
 
 // Take --after command line arg
@@ -58,13 +70,13 @@ let { rootBug, afterDate, headless, disableCache } = (() => {
 // diffstat -> use bash or something from node?
 
 async function fetchCommitsFor(url, depth = 0) {
-  if (depth > MAX_DEPTH) {
+  if (depth > maxDepth) {
     return;
   }
   let messagePadding = Array(depth * 2).join(" ");
   if (REVS_FOR_BUGS.has(url)) {
     console.log(
-      `${messagePadding}Skipping because this URL has already been seen (I don't think this should happen): ${url}`
+      `${messagePadding}Skipping because this URL has already been seen: ${url}`
     );
     return;
   }
@@ -83,16 +95,21 @@ async function fetchCommitsFor(url, depth = 0) {
     console.log(`${messagePadding}Skipping metabug: ${url}`);
     return;
   }
-  const commits = await page.evaluate(() => {
-    return [...document.querySelectorAll(".comment[data-tags=bugherder]")]
+  const {lastCommitTime,allRevs} = await page.evaluate((afterDate) => {
+    let lastCommitTime;
+    let allRevs = [...document.querySelectorAll(".comment[data-tags=bugherder]")]
       .map(comment => {
         let id = comment.getAttribute("data-id");
         return document.querySelector(`.comment-text[data-comment-id="${id}"]`);
       })
       .filter(comment => {
-        return comment.textContent.includes(
+        let includesCommits = comment.textContent.includes(
           "https://hg.mozilla.org/mozilla-central/rev/"
         );
+
+        lastCommitTime = document.querySelector(`.comment[data-id="${comment.getAttribute("data-comment-id")}"] .change-time .rel-time`).getAttribute("title").split(" ")[0];
+
+        return includesCommits;
       })
       .map(comment => {
         return [...comment.querySelectorAll("a")].map(a =>
@@ -100,9 +117,29 @@ async function fetchCommitsFor(url, depth = 0) {
         );
       })
       .reduce((acc, val) => acc.concat(val), []); // Flatten multiple comments into one array
+
+      return { lastCommitTime, allRevs };
   });
 
-  REVS_FOR_BUGS.set(url, commits);
+  if (allRevs.length && !lastCommitTime) {
+    throw new Error("Got revs but no commit time");
+  }
+  if (!allRevs.length && lastCommitTime) {
+    throw new Error("Got no revs but a commit time");
+  }
+
+  let includeCommits = true;
+  if (lastCommitTime) {
+    if (dateFromDashedString(lastCommitTime) < afterDate) {
+      console.log(`${messagePadding}Skipping ${url} because the last commit is too old ${lastCommitTime}`);
+      includeCommits = false;
+    }
+  }
+
+  if (includeCommits) {
+    REVS_FOR_BUGS.set(url, allRevs);
+  }
+
 
   const metadata = await page.evaluate(() => {
     let email = document.querySelector("#field-value-assigned_to .email");
@@ -126,7 +163,7 @@ async function fetchCommitsFor(url, depth = 0) {
     });
   });
   console.log(
-    `${messagePadding}For ${url} there are ${resolvedBugs.length} dependancies and ${commits.length} mozilla-central commits`
+    `${messagePadding}For ${url} there are ${resolvedBugs.length} dependancies and ${allRevs.length} mozilla-central commits`
   );
   await page.close();
 
@@ -170,7 +207,7 @@ async function fetchCommitsFor(url, depth = 0) {
     totalDeletions += deletions;
   }
 
-  console.log(`Total for ${rootBug} with depth=${MAX_DEPTH}:
+  console.log(`Total for ${rootBug} with depth=${maxDepth}:
 ${totalChanged} changed, ${totalInsertions} insertions, ${totalDeletions} deletions.
 Net addition of ${totalInsertions - totalDeletions} lines.`);
 })();
@@ -252,3 +289,15 @@ const downloadFile = async (url, path) => {
     });
   });
 };
+
+// Convert "2019-10-21" to a Date object:
+function dateFromDashedString(dateString) {
+  let dateParts = dateString.split("-");
+  return new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
+}
+
+function dashedStringFromDate(dateObj) {
+  return new Date(dateObj.getTime() - dateObj.getTimezoneOffset() * 60000)
+  .toISOString()
+  .split("T")[0];
+}
