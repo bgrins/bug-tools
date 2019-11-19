@@ -208,6 +208,7 @@ async function fetchCommitsFor(url, depth = 0) {
   }
 
   console.log(`Total for ${rootBug} with depth=${maxDepth}:
+${REVS_FOR_BUGS.size} bugs with ${flattenedRevs.length} total revisions.
 ${totalChanged} changed, ${totalInsertions} insertions, ${totalDeletions} deletions.
 Net addition of ${totalInsertions - totalDeletions} lines.`);
 })();
@@ -238,42 +239,6 @@ INSERTED,DELETED,MODIFIED,FILENAME
     changed += parseInt(cols[2]);
   }
   return { insertions, deletions, changed };
-}
-
-function parseDiffstatOutputOld(str) {
-  /* The output looks like:
-  `
-base/Element.cpp     |   24 +++---------------------
-base/nsIContent.h    |    4 ++--
-xul/nsXULElement.cpp |   14 ++------------
-xul/nsXULElement.h   |   15 ---------------
-4 files changed, 7 insertions(+), 50 deletions(-)
-  `
-
-  or:
-
-  `
- dom/base/Document.cpp                            |   12 ------------
- dom/base/Document.h                              |    7 -------
- dom/webidl/Document.webidl                       |    3 ---
- js/xpconnect/tests/mochitest/test_bug912322.html |    3 +--
- 4 files changed, 1 insertion(+), 24 deletions(-)
-  `
-  */
-
-  let matches = str.match(
-    /(\d+) files? changed, (\d+) insertions?\(\+\), (\d+) deletions?\(\-\)/
-  );
-
-  if (!matches) {
-    throw new Error("Couldn't detect diffstat output");
-  }
-
-  return {
-    changed: matches[1],
-    insertions: matches[2],
-    deletions: matches[3]
-  };
 }
 
 const downloadFile = async (url, path) => {

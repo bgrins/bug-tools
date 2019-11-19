@@ -12,6 +12,7 @@ As of 2019-11-18 returns:
 
 ```
 Total for https://bugzilla.mozilla.org/show_bug.cgi?id=1566221 with depth=2:
-0 changed, 638 insertions, 23389 deletions.
-Net addition of -22751 lines.
+40 bugs with 82 total revisions.
+0 changed, 725 insertions, 23801 deletions.
+Net addition of -23076 lines.
 ```
