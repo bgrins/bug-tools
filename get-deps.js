@@ -93,6 +93,7 @@ async function fetchCommitsFor(url, depth = 0) {
 
   if (depth > 0 && skip) {
     console.log(`${messagePadding}Skipping metabug: ${url}`);
+    await page.close();
     return;
   }
   const {lastCommitTime,allRevs} = await page.evaluate((afterDate) => {
