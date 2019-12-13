@@ -129,19 +129,6 @@ async function fetchCommitsFor(url, depth = 0) {
     throw new Error("Got no revs but a commit time");
   }
 
-  let includeCommits = true;
-  if (lastCommitTime) {
-    if (dateFromDashedString(lastCommitTime) < afterDate) {
-      console.log(`${messagePadding}Skipping ${url} because the last commit is too old ${lastCommitTime}`);
-      includeCommits = false;
-    }
-  }
-
-  if (includeCommits) {
-    REVS_FOR_BUGS.set(url, allRevs);
-  }
-
-
   const metadata = await page.evaluate(() => {
     let email = document.querySelector("#field-value-assigned_to .email");
     return {
@@ -163,9 +150,21 @@ async function fetchCommitsFor(url, depth = 0) {
       };
     });
   });
-  console.log(
-    `${messagePadding}For ${url} there are ${resolvedBugs.length} dependancies and ${allRevs.length} mozilla-central commits`
-  );
+
+  let includeCommits = true;
+  if (lastCommitTime) {
+    if (dateFromDashedString(lastCommitTime) < afterDate) {
+      console.log(`${messagePadding}Skipping ${metadata.title} because the last commit is too old (${lastCommitTime})`);
+      includeCommits = false;
+    }
+  }
+  if (includeCommits) {
+    REVS_FOR_BUGS.set(url, allRevs);
+    console.log(
+      `${messagePadding}There are ${resolvedBugs.length} dependancies and ${allRevs.length} mozilla-central commits for ${metadata.title}`
+    );
+  }
+
   await page.close();
 
   for (let bug of resolvedBugs) {
