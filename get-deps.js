@@ -73,6 +73,10 @@ async function fetchCommitsFor(url, depth = 0) {
   if (depth > maxDepth) {
     return;
   }
+  let bugID = url.match(/id\=(\d+)/)[1];
+  if (!bugID) {
+    throw new Error(`Couldn't detect bug ID for ${url}`)
+  }
   let messagePadding = Array(depth * 2).join(" ");
   if (REVS_FOR_BUGS.has(url)) {
     console.log(
@@ -129,13 +133,25 @@ async function fetchCommitsFor(url, depth = 0) {
     throw new Error("Got no revs but a commit time");
   }
 
-  const metadata = await page.evaluate(() => {
-    let email = document.querySelector("#field-value-assigned_to .email");
-    return {
-      title: document.title,
-      assignee: email && email.getAttribute("data-user-email")
-    };
-  });
+  // https://bugzilla.mozilla.org/rest/bug?include_fields=id,summary,status,cf_last_resolved,assigned_to&classification=Client%20Software&classification=Developer%20Infrastructure&classification=Components&classification=Server%20Software&classification=Other&f1=blocked&o1=equals&v1=1579952
+  let bugzillaMetadataRequestURL = `https://bugzilla.mozilla.org/rest/bug?include_fields=id,summary,status,assigned_to,cf_last_resolved&bug_id=${bugID}&bug_id_type=anyexact`;
+  // let metadataRequest = await fetch(`https://bugzilla.mozilla.org/buglist.cgi?bug_id=${bugID}&bug_id_type=anyexact&classification=Client%20Software&classification=Developer%20Infrastructure&classification=Components&classification=Server%20Software&classification=Other&query_format=advanced&resolution=---&resolution=FIXED&resolution=INVALID&resolution=WONTFIX&resolution=INACTIVE&resolution=DUPLICATE&resolution=WORKSFORME&resolution=INCOMPLETE&resolution=SUPPORT&ctype=csv&human=1`);
+  let metadata = await metadataRequest.json();
+
+  if (!metadata || !metadata.bugs.length == 1) {
+    throw new Error(`Unexpected data from ${bugzillaMetadataRequestURL}`);
+  }
+  /* This looks like:
+  {
+    cf_last_resolved: "2019-12-12T04:27:46Z"
+    summary: 'Migrate xul test files in js/ to .xhtml',
+    assigned_to_detail: [Object],
+    status: 'RESOLVED',
+    assigned_to: 'emalysz@mozilla.com',
+    id: 1589254 }
+  */
+  metadata = metadata.bugs[0];
+
   METADATA_FOR_BUGS.set(url, metadata);
 
   const resolvedBugs = await page.evaluate(() => {
@@ -154,14 +170,14 @@ async function fetchCommitsFor(url, depth = 0) {
   let includeCommits = true;
   if (lastCommitTime) {
     if (dateFromDashedString(lastCommitTime) < afterDate) {
-      console.log(`${messagePadding}Skipping ${metadata.title} because the last commit is too old (${lastCommitTime})`);
+      console.log(`${messagePadding}Skipping ${metadata.summary} because the last commit is too old (${lastCommitTime})`);
       includeCommits = false;
     }
   }
   if (includeCommits) {
     REVS_FOR_BUGS.set(url, allRevs);
     console.log(
-      `${messagePadding}There are ${resolvedBugs.length} dependancies and ${allRevs.length} mozilla-central commits for ${metadata.title}`
+      `${messagePadding}There are ${resolvedBugs.length} dependancies and ${allRevs.length} mozilla-central commits for ${bugID}: ${metadata.summary} (${metadata.assigned_to} at ${metadata.cf_last_resolved})`
     );
   }
 
