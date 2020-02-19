@@ -135,6 +135,7 @@ async function fetchCommitsFor(url, depth = 0) {
 
   // https://bugzilla.mozilla.org/rest/bug?include_fields=id,summary,status,cf_last_resolved,assigned_to&classification=Client%20Software&classification=Developer%20Infrastructure&classification=Components&classification=Server%20Software&classification=Other&f1=blocked&o1=equals&v1=1579952
   let bugzillaMetadataRequestURL = `https://bugzilla.mozilla.org/rest/bug?include_fields=id,summary,status,assigned_to,cf_last_resolved&bug_id=${bugID}&bug_id_type=anyexact`;
+  let metadataRequest = await fetch(bugzillaMetadataRequestURL);
   // let metadataRequest = await fetch(`https://bugzilla.mozilla.org/buglist.cgi?bug_id=${bugID}&bug_id_type=anyexact&classification=Client%20Software&classification=Developer%20Infrastructure&classification=Components&classification=Server%20Software&classification=Other&query_format=advanced&resolution=---&resolution=FIXED&resolution=INVALID&resolution=WONTFIX&resolution=INACTIVE&resolution=DUPLICATE&resolution=WORKSFORME&resolution=INCOMPLETE&resolution=SUPPORT&ctype=csv&human=1`);
   let metadata = await metadataRequest.json();
 
