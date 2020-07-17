@@ -6,22 +6,23 @@ const REVS_FOR_BUGS = new Map();
 const METADATA_FOR_BUGS = new Map();
 let browser;
 
-let { rootBug, afterDate, headless, disableCache, maxDepth } = (() => {
-  const isValidUrl = string => {
-    try {
-      new URL(string);
-      return true;
-    } catch (_) {
-      return false;
-    }
-  };
-  const isValidDate = string => {
-    return (
-      string &&
-      !!string.match(/(([12]\d{3})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]))/)
-    );
-  };
+const isValidUrl = string => {
+  try {
+    new URL(string);
+    return true;
+  } catch (_) {
+    return false;
+  }
+};
+const isValidDate = string => {
+  return (
+    string &&
+    !!string.match(/(([12]\d{3})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]))/)
+  );
+};
 
+
+let { rootBug, afterDate, headless, disableCache, maxDepth } = (() => {
   let args = process.argv.slice(2);
   let rootBug = null;
   let bugIndex = args.indexOf("--bug");
