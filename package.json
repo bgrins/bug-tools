@@ -4,7 +4,7 @@
   "description": "",
   "author": "",
   "devDependencies": {
-    "node-fetch": "^2.6.0",
+    "node-fetch": "^2.6.1",
     "puppeteer": "^5.1.0",
     "puppeteer-core": "^5.1.0"
   }
